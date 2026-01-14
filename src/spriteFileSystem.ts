@@ -17,9 +17,9 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         this.spriteCache.clear();
     }
 
-    private getSprite(spriteName: string): Sprite {
+    private getSprite(spriteName: string): Sprite | null {
         if (!this.client) {
-            throw vscode.FileSystemError.Unavailable('Not connected to Sprites API');
+            return null;
         }
 
         let sprite = this.spriteCache.get(spriteName);
@@ -67,6 +67,11 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         const { spriteName, path } = this.parseUri(uri);
         const sprite = this.getSprite(spriteName);
 
+        if (!sprite) {
+            // Not connected yet - treat as file not found
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+
         try {
             // Use test + stat to avoid errors on missing files
             const result = await this.safeExec(sprite,
@@ -105,6 +110,10 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
     async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
         const { spriteName, path } = this.parseUri(uri);
         const sprite = this.getSprite(spriteName);
+
+        if (!sprite) {
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
 
         try {
             const result = await this.safeExec(sprite, `ls -1Ap "${path}" 2>/dev/null || true`);
@@ -151,6 +160,10 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         const { spriteName, path } = this.parseUri(uri);
         const sprite = this.getSprite(spriteName);
 
+        if (!sprite) {
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+
         try {
             // First check if file exists
             const checkResult = await this.safeExec(sprite, `test -f "${path}" && echo EXISTS || echo NOTFOUND`);
@@ -186,6 +199,10 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         const { spriteName, path } = this.parseUri(uri);
         const sprite = this.getSprite(spriteName);
 
+        if (!sprite) {
+            throw vscode.FileSystemError.Unavailable('Not connected to Sprites API');
+        }
+
         try {
             const existsResult = await this.safeExec(sprite, `test -e "${path}" && echo EXISTS || echo NOTEXISTS`);
             const exists = existsResult.stdout.trim() === 'EXISTS';
@@ -220,6 +237,10 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         const { spriteName, path } = this.parseUri(uri);
         const sprite = this.getSprite(spriteName);
 
+        if (!sprite) {
+            throw vscode.FileSystemError.Unavailable('Not connected to Sprites API');
+        }
+
         try {
             const result = await this.safeExec(sprite, `mkdir -p "${path}"`);
             if (result.exitCode !== 0) {
@@ -236,6 +257,10 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
     async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
         const { spriteName, path } = this.parseUri(uri);
         const sprite = this.getSprite(spriteName);
+
+        if (!sprite) {
+            throw vscode.FileSystemError.Unavailable('Not connected to Sprites API');
+        }
 
         try {
             const flags = options.recursive ? '-rf' : '-f';
@@ -257,6 +282,10 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         }
 
         const sprite = this.getSprite(oldSprite);
+
+        if (!sprite) {
+            throw vscode.FileSystemError.Unavailable('Not connected to Sprites API');
+        }
 
         try {
             if (!options.overwrite) {

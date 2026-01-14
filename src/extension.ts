@@ -1,17 +1,29 @@
 import * as vscode from 'vscode';
 import { SpritesClient } from '@fly/sprites';
+import { SpriteFileSystemProvider } from './spriteFileSystem';
 
 let globalClient: SpritesClient | null = null;
+let spriteFs: SpriteFileSystemProvider;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Sprite extension is now active');
 
-    // Initialize client if token exists
-    const config = vscode.workspace.getConfiguration('sprite');
-    const token = config.get<string>('apiToken');
-    if (token) {
-        globalClient = new SpritesClient(token);
-    }
+    // Create and register the filesystem provider
+    spriteFs = new SpriteFileSystemProvider();
+    context.subscriptions.push(
+        vscode.workspace.registerFileSystemProvider('sprite', spriteFs, {
+            isCaseSensitive: true,
+            isReadonly: false
+        })
+    );
+
+    // Initialize client if token exists in secrets
+    context.secrets.get('spriteToken').then(token => {
+        if (token) {
+            globalClient = new SpritesClient(token);
+            spriteFs.setClient(globalClient);
+        }
+    });
 
     // Command: Set API Token
     const setToken = vscode.commands.registerCommand('sprite.setToken', async () => {
@@ -22,52 +34,88 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         if (token) {
-            await config.update('apiToken', token, vscode.ConfigurationTarget.Global);
+            await context.secrets.store('spriteToken', token);
             globalClient = new SpritesClient(token);
+            spriteFs.setClient(globalClient);
             vscode.window.showInformationMessage('Sprite API token saved');
         }
     });
 
-    // Command: List Sprites
-    const listSprites = vscode.commands.registerCommand('sprite.listSprites', async () => {
+    // Command: Open Sprite (add as workspace folder)
+    const openSprite = vscode.commands.registerCommand('sprite.openSprite', async () => {
         if (!globalClient) {
-            vscode.window.showErrorMessage('Please set API token first (Sprite: Set API Token)');
+            const setNow = await vscode.window.showErrorMessage(
+                'Please set API token first',
+                'Set Token'
+            );
+            if (setNow === 'Set Token') {
+                vscode.commands.executeCommand('sprite.setToken');
+            }
             return;
         }
 
         try {
-            vscode.window.showInformationMessage('Fetching sprites...');
+            // Fetch list of sprites
             const sprites = await globalClient.listAllSprites();
 
             if (sprites.length === 0) {
-                vscode.window.showInformationMessage('No sprites found');
+                const create = await vscode.window.showInformationMessage(
+                    'No sprites found. Create one?',
+                    'Create Sprite'
+                );
+                if (create === 'Create Sprite') {
+                    vscode.commands.executeCommand('sprite.createSprite');
+                }
                 return;
             }
 
+            // Let user select a sprite
             const items = sprites.map(s => ({
                 label: s.name,
-                description: `Status: ${s.status || 'unknown'}`,
+                description: s.status || '',
                 sprite: s
             }));
 
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a sprite to view details'
+                placeHolder: 'Select a Sprite to open'
             });
 
-            if (selected) {
-                vscode.window.showInformationMessage(
-                    `Sprite: ${selected.sprite.name}\nStatus: ${selected.sprite.status || 'N/A'}`
-                );
+            if (!selected) {
+                return;
             }
+
+            // Ask for the path to open (default to home directory)
+            const path = await vscode.window.showInputBox({
+                prompt: 'Enter path to open',
+                value: '/home/sprite',
+                ignoreFocusOut: true
+            });
+
+            if (!path) {
+                return;
+            }
+
+            // Create URI and add as workspace folder
+            const uri = vscode.Uri.parse(`sprite://${selected.sprite.name}${path}`);
+
+            // Add to workspace
+            const workspaceFolders = vscode.workspace.workspaceFolders || [];
+            vscode.workspace.updateWorkspaceFolders(
+                workspaceFolders.length,
+                0,
+                { uri, name: `Sprite: ${selected.sprite.name}` }
+            );
+
+            vscode.window.showInformationMessage(`Opened Sprite: ${selected.sprite.name}`);
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Error listing sprites: ${error.message}`);
+            vscode.window.showErrorMessage(`Error: ${error.message}`);
         }
     });
 
     // Command: Create Sprite
     const createSprite = vscode.commands.registerCommand('sprite.createSprite', async () => {
         if (!globalClient) {
-            vscode.window.showErrorMessage('Please set API token first (Sprite: Set API Token)');
+            vscode.window.showErrorMessage('Please set API token first');
             return;
         }
 
@@ -81,92 +129,138 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         try {
-            vscode.window.showInformationMessage(`Creating sprite: ${name}...`);
-            await globalClient.createSprite(name);
-            vscode.window.showInformationMessage(`Sprite '${name}' created successfully`);
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Creating sprite: ${name}`,
+                cancellable: false
+            }, async () => {
+                await globalClient!.createSprite(name);
+            });
+
+            const open = await vscode.window.showInformationMessage(
+                `Sprite '${name}' created successfully`,
+                'Open Sprite'
+            );
+
+            if (open === 'Open Sprite') {
+                const uri = vscode.Uri.parse(`sprite://${name}/home/sprite`);
+                const workspaceFolders = vscode.workspace.workspaceFolders || [];
+                vscode.workspace.updateWorkspaceFolders(
+                    workspaceFolders.length,
+                    0,
+                    { uri, name: `Sprite: ${name}` }
+                );
+            }
         } catch (error: any) {
             vscode.window.showErrorMessage(`Error creating sprite: ${error.message}`);
         }
     });
 
-    // Command: Execute Command
-    const execCommand = vscode.commands.registerCommand('sprite.execCommand', async () => {
+    // Command: Open Terminal
+    const openTerminal = vscode.commands.registerCommand('sprite.openTerminal', async () => {
         if (!globalClient) {
-            vscode.window.showErrorMessage('Please set API token first (Sprite: Set API Token)');
+            vscode.window.showErrorMessage('Please set API token first');
             return;
         }
 
-        try {
-            // Get list of sprites
-            const sprites = await globalClient.listAllSprites();
+        // Get sprite from current file or ask user
+        let spriteName: string | undefined;
 
-            if (sprites.length === 0) {
-                vscode.window.showInformationMessage('No sprites found. Create one first.');
-                return;
-            }
-
-            // Select sprite
-            const spriteItems = sprites.map(s => ({
-                label: s.name,
-                sprite: s
-            }));
-
-            const selectedSprite = await vscode.window.showQuickPick(spriteItems, {
-                placeHolder: 'Select sprite to execute command on'
-            });
-
-            if (!selectedSprite) {
-                return;
-            }
-
-            // Get command
-            const command = await vscode.window.showInputBox({
-                prompt: 'Enter command to execute',
-                placeHolder: 'ls -la'
-            });
-
-            if (!command) {
-                return;
-            }
-
-            // Execute command
-            vscode.window.showInformationMessage(`Executing: ${command} on ${selectedSprite.label}...`);
-
-            const sprite = globalClient.sprite(selectedSprite.sprite.name);
-            const result = await sprite.exec(command);
-
-            // Show output in new document
-            const doc = await vscode.workspace.openTextDocument({
-                content: `Command: ${command}\nSprite: ${selectedSprite.sprite.name}\n\n=== STDOUT ===\n${result.stdout}\n\n=== STDERR ===\n${result.stderr}`,
-                language: 'plaintext'
-            });
-            await vscode.window.showTextDocument(doc);
-
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Error executing command: ${error.message}`);
-        }
-    });
-
-    // Command: Delete Sprite
-    const deleteSprite = vscode.commands.registerCommand('sprite.deleteSprite', async () => {
-        if (!globalClient) {
-            vscode.window.showErrorMessage('Please set API token first (Sprite: Set API Token)');
-            return;
+        const activeUri = vscode.window.activeTextEditor?.document.uri;
+        if (activeUri?.scheme === 'sprite') {
+            spriteName = activeUri.authority;
         }
 
-        try {
+        if (!spriteName) {
             const sprites = await globalClient.listAllSprites();
-
             if (sprites.length === 0) {
                 vscode.window.showInformationMessage('No sprites found');
                 return;
             }
 
-            const items = sprites.map(s => ({
-                label: s.name,
-                sprite: s
-            }));
+            const items = sprites.map(s => ({ label: s.name, sprite: s }));
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select sprite for terminal'
+            });
 
+            if (!selected) {
+                return;
+            }
+            spriteName = selected.sprite.name;
+        }
+
+        const sprite = globalClient.sprite(spriteName);
+
+        // Create pseudo-terminal
+        const writeEmitter = new vscode.EventEmitter<string>();
+        let shellCmd: any;
+
+        const pty: vscode.Pseudoterminal = {
+            onDidWrite: writeEmitter.event,
+            open: async (initialDimensions) => {
+                writeEmitter.fire(`Connecting to sprite: ${spriteName}\r\n`);
+
+                try {
+                    shellCmd = sprite.spawn('bash', ['-l'], {
+                        tty: true,
+                        rows: initialDimensions?.rows || 24,
+                        cols: initialDimensions?.columns || 80
+                    });
+
+                    shellCmd.stdout?.on('data', (data: Buffer) => {
+                        writeEmitter.fire(data.toString());
+                    });
+
+                    shellCmd.stderr?.on('data', (data: Buffer) => {
+                        writeEmitter.fire(data.toString());
+                    });
+
+                    shellCmd.on('exit', () => {
+                        writeEmitter.fire('\r\n[Disconnected]\r\n');
+                    });
+                } catch (error: any) {
+                    writeEmitter.fire(`\r\nError: ${error.message}\r\n`);
+                }
+            },
+            close: () => {
+                if (shellCmd) {
+                    shellCmd.kill();
+                }
+            },
+            handleInput: (data: string) => {
+                if (shellCmd?.stdin) {
+                    shellCmd.stdin.write(data);
+                }
+            },
+            setDimensions: (dimensions: vscode.TerminalDimensions) => {
+                if (shellCmd) {
+                    shellCmd.resize(dimensions.columns, dimensions.rows);
+                }
+            }
+        };
+
+        const terminal = vscode.window.createTerminal({
+            name: `Sprite: ${spriteName}`,
+            pty
+        });
+        terminal.show();
+    });
+
+    // Command: Delete Sprite
+    const deleteSprite = vscode.commands.registerCommand('sprite.deleteSprite', async () => {
+        if (!globalClient) {
+            vscode.window.showErrorMessage('Please set API token first');
+            return;
+        }
+
+        try {
+            const sprites = await globalClient.listAllSprites();
+            if (sprites.length === 0) {
+                vscode.window.showInformationMessage('No sprites found');
+                return;
+            }
+
+            const items = sprites.map(s => ({ label: s.name, sprite: s }));
             const selected = await vscode.window.showQuickPick(items, {
                 placeHolder: 'Select sprite to delete'
             });
@@ -176,102 +270,43 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const confirm = await vscode.window.showWarningMessage(
-                `Are you sure you want to delete sprite '${selected.sprite.name}'?`,
-                'Yes', 'No'
+                `Delete sprite '${selected.sprite.name}'? This cannot be undone.`,
+                { modal: true },
+                'Delete'
             );
 
-            if (confirm === 'Yes') {
+            if (confirm === 'Delete') {
                 await globalClient.deleteSprite(selected.sprite.name);
+
+                // Remove from workspace if present
+                const workspaceFolders = vscode.workspace.workspaceFolders || [];
+                const index = workspaceFolders.findIndex(
+                    f => f.uri.scheme === 'sprite' && f.uri.authority === selected.sprite.name
+                );
+                if (index !== -1) {
+                    vscode.workspace.updateWorkspaceFolders(index, 1);
+                }
+
                 vscode.window.showInformationMessage(`Sprite '${selected.sprite.name}' deleted`);
             }
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Error deleting sprite: ${error.message}`);
+            vscode.window.showErrorMessage(`Error: ${error.message}`);
         }
     });
 
-    // Command: Open Terminal
-    const openTerminal = vscode.commands.registerCommand('sprite.openTerminal', async () => {
-        if (!globalClient) {
-            vscode.window.showErrorMessage('Please set API token first (Sprite: Set API Token)');
-            return;
-        }
-
-        try {
-            const sprites = await globalClient.listAllSprites();
-
-            if (sprites.length === 0) {
-                vscode.window.showInformationMessage('No sprites found');
-                return;
-            }
-
-            const items = sprites.map(s => ({
-                label: s.name,
-                sprite: s
-            }));
-
-            const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select sprite to open terminal'
-            });
-
-            if (!selected) {
-                return;
-            }
-
-            const sprite = globalClient.sprite(selected.sprite.name);
-
-            // Create pseudo-terminal
-            const writeEmitter = new vscode.EventEmitter<string>();
-            const pty: vscode.Pseudoterminal = {
-                onDidWrite: writeEmitter.event,
-                open: async () => {
-                    writeEmitter.fire(`Connected to sprite: ${selected.sprite.name}\r\n\r\n`);
-
-                    // Start interactive shell
-                    const cmd = sprite.spawn('bash', [], { tty: true });
-
-                    cmd.stdout?.on('data', (data) => {
-                        writeEmitter.fire(data.toString());
-                    });
-
-                    cmd.stderr?.on('data', (data) => {
-                        writeEmitter.fire(data.toString());
-                    });
-
-                    // Store command for input handling
-                    (pty as any).cmd = cmd;
-                },
-                close: () => {
-                    const cmd = (pty as any).cmd;
-                    if (cmd) {
-                        cmd.kill();
-                    }
-                },
-                handleInput: (data: string) => {
-                    const cmd = (pty as any).cmd;
-                    if (cmd && cmd.stdin) {
-                        cmd.stdin.write(data);
-                    }
-                }
-            };
-
-            const terminal = vscode.window.createTerminal({
-                name: `Sprite: ${selected.sprite.name}`,
-                pty
-            });
-            terminal.show();
-
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Error opening terminal: ${error.message}`);
-        }
+    // Command: Refresh Sprite (re-read filesystem)
+    const refreshSprite = vscode.commands.registerCommand('sprite.refresh', async () => {
+        // Trigger a refresh of the explorer
+        vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
     });
 
     context.subscriptions.push(
         setToken,
-        listSprites,
+        openSprite,
         createSprite,
-        execCommand,
+        openTerminal,
         deleteSprite,
-        openTerminal
+        refreshSprite
     );
 }
 

@@ -1,50 +1,53 @@
 {
   "name": "vscode-sprite",
-  "displayName": "Sprite Extension",
-  "description": "Manage and interact with Sprites from VS Code",
+  "displayName": "Sprite",
+  "description": "Browse and edit files on Sprites.dev sandboxes directly from VS Code",
   "version": "0.1.0",
+  "publisher": "sprite",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onCommand:sprite.listSprites"],
+  "activationEvents": [
+    "onFileSystem:sprite"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "sprite.listSprites",
-        "title": "Sprite: List Sprites"
+        "command": "sprite.setToken",
+        "title": "Sprite: Set API Token"
+      },
+      {
+        "command": "sprite.openSprite",
+        "title": "Sprite: Open Sprite"
       },
       {
         "command": "sprite.createSprite",
         "title": "Sprite: Create Sprite"
       },
       {
-        "command": "sprite.execCommand",
-        "title": "Sprite: Execute Command"
+        "command": "sprite.openTerminal",
+        "title": "Sprite: Open Terminal"
       },
       {
         "command": "sprite.deleteSprite",
         "title": "Sprite: Delete Sprite"
       },
       {
-        "command": "sprite.setToken",
-        "title": "Sprite: Set API Token"
-      },
-      {
-        "command": "sprite.openTerminal",
-        "title": "Sprite: Open Terminal"
+        "command": "sprite.refresh",
+        "title": "Sprite: Refresh Files"
       }
     ],
-    "configuration": {
-      "title": "Sprite",
-      "properties": {
-        "sprite.apiToken": {
-          "type": "string",
-          "default": "",
-          "description": "Sprites.dev API token"
-        }
-      }
+    "menus": {
+      "commandPalette": [
+        { "command": "sprite.setToken" },
+        { "command": "sprite.openSprite" },
+        { "command": "sprite.createSprite" },
+        { "command": "sprite.openTerminal" },
+        { "command": "sprite.deleteSprite" },
+        { "command": "sprite.refresh" }
+      ]
     }
   },
   "scripts": {

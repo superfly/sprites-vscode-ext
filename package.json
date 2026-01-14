@@ -12,7 +12,7 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Remote Development"],
+  "categories": ["Other"],
   "keywords": ["sprite", "sprites", "sandbox", "remote", "fly.io"],
   "activationEvents": ["onFileSystem:sprite"],
   "main": "./dist/extension.js",

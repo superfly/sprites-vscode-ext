@@ -3,11 +3,31 @@ import { SpritesClient } from '@fly/sprites';
 import { SpriteFileSystemProvider } from './spriteFileSystem';
 
 let globalClient: SpritesClient | null = null;
-let spriteFs: SpriteFileSystemProvider | null = null;
-let fsRegistered = false;
+const spriteFs = new SpriteFileSystemProvider();
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Sprite extension is now active');
+
+    // Register filesystem provider IMMEDIATELY on activation
+    context.subscriptions.push(
+        vscode.workspace.registerFileSystemProvider('sprite', spriteFs, {
+            isCaseSensitive: true,
+            isReadonly: false
+        })
+    );
+
+    // Restore token on startup (async, but provider is already registered)
+    context.secrets.get('spriteToken').then(token => {
+        if (token) {
+            try {
+                globalClient = new SpritesClient(token);
+                spriteFs.setClient(globalClient);
+                console.log('Sprite: Token restored from secrets');
+            } catch (e: any) {
+                console.error('Sprite: Failed to restore token:', e.message);
+            }
+        }
+    });
 
     // Command: Set API Token
     const setToken = vscode.commands.registerCommand('sprite.setToken', async () => {
@@ -21,21 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
             await context.secrets.store('spriteToken', token);
             try {
                 globalClient = new SpritesClient(token);
-                if (!spriteFs) {
-                    spriteFs = new SpriteFileSystemProvider();
-                }
                 spriteFs.setClient(globalClient);
-
-                if (!fsRegistered) {
-                    context.subscriptions.push(
-                        vscode.workspace.registerFileSystemProvider('sprite', spriteFs, {
-                            isCaseSensitive: true,
-                            isReadonly: false
-                        })
-                    );
-                    fsRegistered = true;
-                }
-
                 vscode.window.showInformationMessage('Sprite API token saved');
             } catch (error: any) {
                 vscode.window.showErrorMessage(`Error: ${error.message}`);
@@ -299,26 +305,6 @@ export function activate(context: vscode.ExtensionContext) {
         deleteSprite,
         refreshSprite
     );
-
-    // Restore token on startup
-    context.secrets.get('spriteToken').then(async token => {
-        if (token) {
-            try {
-                globalClient = new SpritesClient(token);
-                spriteFs = new SpriteFileSystemProvider();
-                spriteFs.setClient(globalClient);
-                context.subscriptions.push(
-                    vscode.workspace.registerFileSystemProvider('sprite', spriteFs, {
-                        isCaseSensitive: true,
-                        isReadonly: false
-                    })
-                );
-                fsRegistered = true;
-            } catch (e) {
-                // Token restore failed silently
-            }
-        }
-    });
 }
 
 export function deactivate() {}

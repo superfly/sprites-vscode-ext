@@ -4,6 +4,7 @@
   "description": "Browse and edit files on Sprites.dev sandboxes directly from VS Code",
   "version": "1.0.0",
   "publisher": "flyio",
+  "icon": "vslogo.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/superfly/sprites-vscode-ext"

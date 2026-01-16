@@ -2,7 +2,7 @@
   "name": "sprites-for-vscode",
   "displayName": "Sprites for VS Code",
   "description": "Browse and edit files on Sprites.dev sandboxes directly from VS Code",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "flyio",
   "icon": "vslogo.png",
   "repository": {

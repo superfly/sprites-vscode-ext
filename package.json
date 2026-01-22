@@ -2,7 +2,7 @@
   "name": "sprites-for-vscode",
   "displayName": "Sprites for VS Code",
   "description": "Browse and edit files on Sprites.dev sandboxes directly from VS Code",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "flyio",
   "icon": "vslogo.png",
   "repository": {
@@ -23,7 +23,8 @@
       { "command": "sprite.createSprite", "title": "Sprites: Create Sprite" },
       { "command": "sprite.openTerminal", "title": "Sprites: Open Terminal" },
       { "command": "sprite.deleteSprite", "title": "Sprites: Delete Sprite" },
-      { "command": "sprite.refresh", "title": "Sprites: Refresh Files" }
+      { "command": "sprite.refresh", "title": "Sprites: Refresh Files" },
+      { "command": "sprite.downloadToLocal", "title": "Download to Local" }
     ],
     "menus": {
       "commandPalette": [
@@ -32,7 +33,14 @@
         { "command": "sprite.createSprite" },
         { "command": "sprite.openTerminal" },
         { "command": "sprite.deleteSprite" },
-        { "command": "sprite.refresh" }
+        { "command": "sprite.refresh" },
+        { "command": "sprite.downloadToLocal", "when": "resourceScheme == sprite" }
+      ],
+      "explorer/context": [
+        { "command": "sprite.downloadToLocal", "when": "resourceScheme == sprite", "group": "7_modification" }
+      ],
+      "editor/title/context": [
+        { "command": "sprite.downloadToLocal", "when": "resourceScheme == sprite" }
       ]
     }
   },

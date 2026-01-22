@@ -214,18 +214,22 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         }
 
         try {
-            // First check if file exists
-            const checkResult = await this.safeExec(sprite, `test -f "${path}" && echo EXISTS || echo NOTFOUND`);
-            if (checkResult.stdout.trim() !== 'EXISTS') {
+            // Combined check and read in single command
+            const result = await this.safeExec(sprite,
+                `if [ -f "${path}" ]; then base64 "${path}"; elif [ -e "${path}" ]; then echo "ISDIR"; else echo "NOTFOUND"; fi`
+            );
+            const output = result.stdout.trim();
+
+            if (output === 'NOTFOUND') {
                 throw vscode.FileSystemError.FileNotFound(uri);
             }
+            if (output === 'ISDIR') {
+                throw vscode.FileSystemError.FileIsADirectory(uri);
+            }
 
-            // Read file content
-            const result = await this.safeExec(sprite, `base64 "${path}"`);
-            const base64Content = result.stdout.replace(/\s/g, '');
+            const base64Content = output.replace(/\s/g, '');
 
             if (!base64Content) {
-                // Empty file
                 return new Uint8Array(0);
             }
 
@@ -253,24 +257,37 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         }
 
         try {
-            const existsResult = await this.safeExec(sprite, `test -e "${path}" && echo EXISTS || echo NOTEXISTS`);
-            const exists = existsResult.stdout.trim() === 'EXISTS';
+            const parentDir = path.substring(0, path.lastIndexOf('/')) || '/';
+            const base64Content = Buffer.from(content).toString('base64');
 
-            if (exists && !options.overwrite) {
+            // Combine all operations into a single command to reduce latency
+            const script = `
+                exists=0; [ -e "${path}" ] && exists=1
+                if [ $exists -eq 1 ] && [ "${options.overwrite ? '1' : '0'}" = "0" ]; then
+                    echo "EXISTS"; exit 1
+                fi
+                if [ $exists -eq 0 ] && [ "${options.create ? '1' : '0'}" = "0" ]; then
+                    echo "NOTFOUND"; exit 1
+                fi
+                mkdir -p "${parentDir}" && echo "${base64Content}" | base64 -d > "${path}" && echo "OK:$exists"
+            `;
+
+            const result = await this.safeExec(sprite, script);
+            const output = result.stdout.trim();
+
+            if (output === 'EXISTS') {
                 throw vscode.FileSystemError.FileExists(uri);
             }
-            if (!exists && !options.create) {
+            if (output === 'NOTFOUND') {
                 throw vscode.FileSystemError.FileNotFound(uri);
             }
+            if (!output.startsWith('OK:')) {
+                throw new Error(result.stderr || 'Write failed');
+            }
 
-            const parentDir = path.substring(0, path.lastIndexOf('/')) || '/';
-            await this.safeExec(sprite, `mkdir -p "${parentDir}"`);
-
-            const base64Content = Buffer.from(content).toString('base64');
-            await this.safeExec(sprite, `echo "${base64Content}" | base64 -d > "${path}"`);
-
+            const existed = output === 'OK:1';
             this._emitter.fire([{
-                type: exists ? vscode.FileChangeType.Changed : vscode.FileChangeType.Created,
+                type: existed ? vscode.FileChangeType.Changed : vscode.FileChangeType.Created,
                 uri
             }]);
         } catch (error: any) {
@@ -337,14 +354,20 @@ export class SpriteFileSystemProvider implements vscode.FileSystemProvider {
         }
 
         try {
-            if (!options.overwrite) {
-                const existsResult = await this.safeExec(sprite, `test -e "${newPath}" && echo EXISTS || echo NOTEXISTS`);
-                if (existsResult.stdout.trim() === 'EXISTS') {
-                    throw vscode.FileSystemError.FileExists(newUri);
-                }
-            }
+            // Combined check and move in single command
+            const script = options.overwrite
+                ? `mv "${oldPath}" "${newPath}" && echo OK`
+                : `if [ -e "${newPath}" ]; then echo EXISTS; else mv "${oldPath}" "${newPath}" && echo OK; fi`;
 
-            await this.safeExec(sprite, `mv "${oldPath}" "${newPath}"`);
+            const result = await this.safeExec(sprite, script);
+            const output = result.stdout.trim();
+
+            if (output === 'EXISTS') {
+                throw vscode.FileSystemError.FileExists(newUri);
+            }
+            if (output !== 'OK') {
+                throw new Error(result.stderr || 'Move failed');
+            }
 
             this._emitter.fire([
                 { type: vscode.FileChangeType.Deleted, uri: oldUri },

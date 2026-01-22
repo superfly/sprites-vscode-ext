@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { SpritesClient } from '@fly/sprites';
 import { SpriteFileSystemProvider } from './spriteFileSystem';
 
@@ -298,13 +300,90 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
     });
 
+    // Command: Download to Local
+    const downloadToLocal = vscode.commands.registerCommand('sprite.downloadToLocal', async (uri?: vscode.Uri) => {
+        // Get URI from context menu or active editor
+        if (!uri) {
+            uri = vscode.window.activeTextEditor?.document.uri;
+        }
+
+        if (!uri || uri.scheme !== 'sprite') {
+            vscode.window.showErrorMessage('Please select a file or folder from a Sprite');
+            return;
+        }
+
+        // Ask user where to save
+        const isDirectory = (await vscode.workspace.fs.stat(uri)).type === vscode.FileType.Directory;
+
+        let targetPath: vscode.Uri | undefined;
+        if (isDirectory) {
+            const folders = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: 'Select Download Location'
+            });
+            if (folders && folders.length > 0) {
+                const folderName = path.basename(uri.path);
+                targetPath = vscode.Uri.joinPath(folders[0], folderName);
+            }
+        } else {
+            const fileName = path.basename(uri.path);
+            targetPath = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(path.join(require('os').homedir(), 'Downloads', fileName)),
+                saveLabel: 'Download'
+            });
+        }
+
+        if (!targetPath) {
+            return;
+        }
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Downloading ${path.basename(uri.path)}`,
+            cancellable: false
+        }, async (progress) => {
+            try {
+                if (isDirectory) {
+                    await downloadDirectory(uri!, targetPath!);
+                } else {
+                    const content = await vscode.workspace.fs.readFile(uri!);
+                    await fs.promises.mkdir(path.dirname(targetPath!.fsPath), { recursive: true });
+                    await fs.promises.writeFile(targetPath!.fsPath, content);
+                }
+                vscode.window.showInformationMessage(`Downloaded to ${targetPath!.fsPath}`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Download failed: ${error.message}`);
+            }
+        });
+    });
+
+    async function downloadDirectory(sourceUri: vscode.Uri, targetUri: vscode.Uri): Promise<void> {
+        await fs.promises.mkdir(targetUri.fsPath, { recursive: true });
+
+        const entries = await vscode.workspace.fs.readDirectory(sourceUri);
+        for (const [name, type] of entries) {
+            const sourceChild = vscode.Uri.joinPath(sourceUri, name);
+            const targetChild = vscode.Uri.joinPath(targetUri, name);
+
+            if (type === vscode.FileType.Directory) {
+                await downloadDirectory(sourceChild, targetChild);
+            } else {
+                const content = await vscode.workspace.fs.readFile(sourceChild);
+                await fs.promises.writeFile(targetChild.fsPath, content);
+            }
+        }
+    }
+
     context.subscriptions.push(
         setToken,
         openSprite,
         createSprite,
         openTerminal,
         deleteSprite,
-        refreshSprite
+        refreshSprite,
+        downloadToLocal
     );
 }
 

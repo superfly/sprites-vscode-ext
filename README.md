@@ -6,6 +6,7 @@ Browse and edit files on [Sprites.dev](https://sprites.dev) sandboxes directly f
 
 - **File Explorer Integration**: Browse your Sprite's filesystem directly in VS Code's file explorer
 - **Edit Files**: Open, edit, and save files on your Sprite
+- **Download Files**: Download files and folders from your Sprite to your local machine
 - **Integrated Terminal**: Open a terminal session to your Sprite
 - **Create & Manage Sprites**: Create new Sprites or delete existing ones
 
@@ -26,6 +27,7 @@ Browse and edit files on [Sprites.dev](https://sprites.dev) sandboxes directly f
 | `Sprites: Open Terminal` | Open an interactive terminal to a Sprite |
 | `Sprites: Delete Sprite` | Delete an existing Sprite |
 | `Sprites: Refresh Files` | Refresh the file explorer |
+| `Download to Local` | Download files/folders to your local machine (right-click in explorer) |
 
 ## Requirements
 

@@ -93,7 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const path = await vscode.window.showInputBox({
-                prompt: 'Enter path to open',
+                prompt: 'Enter path in Sprite to open',
                 value: '/home/sprite',
                 ignoreFocusOut: true
             });
